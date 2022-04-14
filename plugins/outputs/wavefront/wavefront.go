@@ -161,21 +161,21 @@ func (w *Wavefront) Write(metrics []telegraf.Metric) error {
 		for _, point := range w.buildMetrics(m) {
 			err := w.sender.SendMetric(point.Metric, point.Value, point.Timestamp, point.Source, point.Tags)
 			if err != nil {
-				if isRetryable(err) {
-					if flushErr := w.sender.Flush(); flushErr != nil {
-						w.Log.Errorf("wavefront flushing error: %v", flushErr)
-					}
-					return fmt.Errorf("wavefront sending error: %v", err)
-				}
+			//	if isRetryable(err) {
+			//		if flushErr := w.sender.Flush(); flushErr != nil {
+			//			w.Log.Errorf("wavefront flushing error: %v", flushErr)
+			//		}
+			//		return fmt.Errorf("wavefront sending error: %v", err)
+			//	}
 				w.Log.Errorf("non-retryable error during Wavefront.Write: %v", err)
-				w.Log.Debugf("Non-retryable metric data: Name: %v, Value: %v, Timestamp: %v, Source: %v, PointTags: %v ", point.Metric, point.Value, point.Timestamp, point.Source, point.Tags)
+			//	w.Log.Debugf("Non-retryable metric data: Name: %v, Value: %v, Timestamp: %v, Source: %v, PointTags: %v ", point.Metric, point.Value, point.Timestamp, point.Source, point.Tags)
 			}
 		}
 	}
-	if w.ImmediateFlush {
-		w.Log.Debugf("Flushing batch of %d points", len(metrics))
-		return w.sender.Flush()
-	}
+	//if w.ImmediateFlush {
+	//	w.Log.Debugf("Flushing batch of %d points", len(metrics))
+	//	return w.sender.Flush()
+	//}
 	return nil
 }
 

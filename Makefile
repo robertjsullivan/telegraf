@@ -37,7 +37,7 @@ else
 endif
 
 MAKEFLAGS += --no-print-directory
-GOOS ?= $(shell go env GOOS)
+GOOS ?= linux
 GOARCH ?= $(shell go env GOARCH)
 HOSTGO := env -u GOOS -u GOARCH -u GOARM -- go
 
