@@ -2,11 +2,13 @@ package wavefront
 
 import (
 	"fmt"
+	"net/http"
+	"os"
 	"regexp"
 	"strings"
 
-	wavefront "github.com/wavefronthq/wavefront-sdk-go/senders"
-
+	wavefront "github.com/influxdata/telegraf/plugins/outputs/wavefront/wavefront-sdk-go/senders"
+	"github.com/influxdata/telegraf/plugins/outputs/wavefront/wavefront-sdk-go/notinternal"
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/plugins/outputs"
 )
@@ -29,9 +31,10 @@ type Wavefront struct {
 	ImmediateFlush  bool                            `toml:"immediate_flush"`
 	SourceOverride  []string                        `toml:"source_override"`
 	StringToNumber  map[string][]map[string]float64 `toml:"string_to_number" deprecated:"1.9.0;use the enum processor instead"`
-
+	defaultSender string
 	sender wavefront.Sender
 	Log    telegraf.Logger `toml:"-"`
+	reporter      notinternal.Reporter
 }
 
 // catch many of the invalid chars that could appear in a metric or tag name
@@ -120,6 +123,8 @@ type MetricPoint struct {
 
 func (w *Wavefront) Connect() error {
 	flushSeconds := 5
+	println("connecting custom wavefront output")
+	w.defaultSender = GetHostname("wavefront_direct_sender")
 	if w.ImmediateFlush {
 		flushSeconds = 86400 // Set a very long flush interval if we're flushing directly
 	}
@@ -146,6 +151,7 @@ func (w *Wavefront) Connect() error {
 		}
 		w.sender = sender
 	}
+	w.reporter = notinternal.NewDirectReporter(w.URL, w.Token)
 
 	if w.ConvertPaths && w.MetricSeparator == "_" {
 		w.ConvertPaths = false
@@ -156,27 +162,62 @@ func (w *Wavefront) Connect() error {
 	return nil
 }
 
+func GetHostname(defaultVal string) string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return defaultVal
+	}
+	return hostname
+}
+
 func (w *Wavefront) Write(metrics []telegraf.Metric) error {
+	println(fmt.Sprintf("number of metrics received from telegraf in write: %d", len(metrics)))
+	lines := make([]string, 0)
 	for _, m := range metrics {
 		for _, point := range w.buildMetrics(m) {
-			err := w.sender.SendMetric(point.Metric, point.Value, point.Timestamp, point.Source, point.Tags)
+			line, err := wavefront.MetricLine(point.Metric, point.Value, point.Timestamp, point.Source, point.Tags, w.defaultSender)
 			if err != nil {
-			//	if isRetryable(err) {
-			//		if flushErr := w.sender.Flush(); flushErr != nil {
-			//			w.Log.Errorf("wavefront flushing error: %v", flushErr)
-			//		}
-			//		return fmt.Errorf("wavefront sending error: %v", err)
-			//	}
-				w.Log.Errorf("non-retryable error during Wavefront.Write: %v", err)
-			//	w.Log.Debugf("Non-retryable metric data: Name: %v, Value: %v, Timestamp: %v, Source: %v, PointTags: %v ", point.Metric, point.Value, point.Timestamp, point.Source, point.Tags)
+				println(err.Error())
+				continue
 			}
+			lines = append(lines, line)
 		}
+	}
+	println(fmt.Sprintf("number of metrics to report to Wavefront : %d", len(lines)))
+	err := w.report(lines)
+	if err != nil {
+		//	if isRetryable(err) {
+		//		if flushErr := w.sender.Flush(); flushErr != nil {
+		//			w.Log.Errorf("wavefront flushing error: %v", flushErr)
+		//		}
+		//		return fmt.Errorf("wavefront sending error: %v", err)
+		//	}
+		w.Log.Errorf("non-retryable error during Wavefront.Write: %v", err)
+		//	w.Log.Debugf("Non-retryable metric data: Name: %v, Value: %v, Timestamp: %v, Source: %v, PointTags: %v ", point.Metric, point.Value, point.Timestamp, point.Source, point.Tags)
 	}
 	//if w.ImmediateFlush {
 	//	w.Log.Debugf("Flushing batch of %d points", len(metrics))
 	//	return w.sender.Flush()
 	//}
 	return nil
+}
+
+
+func (w *Wavefront) report(lines []string) error {
+	strLines := strings.Join(lines, "")
+	var resp *http.Response
+	var err error
+
+	resp, err = w.reporter.Report(notinternal.MetricFormat, strLines)
+
+	if err != nil {
+		println(fmt.Sprintf("error sending data to Wavefront: %q", err))
+	}
+
+	if resp.StatusCode == 406 {
+		println("we're being throttled")
+	}
+	return err
 }
 
 func (w *Wavefront) buildMetrics(m telegraf.Metric) []*MetricPoint {

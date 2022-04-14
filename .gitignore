@@ -3,7 +3,6 @@
 /telegraf
 /telegraf.exe
 /telegraf.gz
-/vendor
 .DS_Store
 process.yml
 /.vscode
